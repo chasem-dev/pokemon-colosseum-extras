@@ -18,6 +18,13 @@ cards) are left out, so the game shows its English there.
 
 --template also writes OUT/template/text.txt: every English line, for translating into a language
 the European disc doesn't have. A pack needs only pack.json and text.txt; the rest is optional.
+
+Pokémon XD (US disc GXXE01): only the template so far, for fan translations, without a European disc:
+
+    make_language_packs.py XD_US.iso - OUT --template
+
+writes OUT/xd-template/ (text.txt with every English line of XD, and a pack.json for XD). Packs made from XD's
+European disc (GXXP01) are still to come.
 """
 import argparse
 import collections
@@ -35,6 +42,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import colodisc as cd  # noqa: E402
 import colomsg as cm  # noqa: E402
+import xdtext  # noqa: E402
 
 PACK_FORMAT = 1
 LANGS = {  # pack code: (PAL message suffix, PAL archive suffix, wzx prefix, name)
@@ -165,14 +173,21 @@ def gather_text(us, pal):
     return out, english
 
 
-def write_text(path, code, name, lines, english, template=False):
+FONT_NOTE = {
+    "Pokémon Colosseum": "The game's fonts have the Latin-1 letters, Œ œ ‘ ’ “ ” „ …\n"
+                         "# and, with this pack's font.bin, ° ♪ γ.\n",
+    "Pokémon XD": "XD's fonts have the letters of French, German, Spanish and\n"
+                  "# Italian (À-ü, ß, Œ œ, ¡ ¿, « », ‘ ’ “ ” „) and ♂ ♀, but not ° ♪ …: a letter they lack needs a font.bin.\n",
+}
+
+
+def write_text(path, code, name, lines, english, template=False, game="Pokémon Colosseum"):
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("# Pokémon Colosseum text: %s (%s). Language pack format %d.\n" % (name, code, PACK_FORMAT))
+        f.write("# %s text: %s (%s). Language pack format %d.\n" % (game, name, code, PACK_FORMAT))
         f.write("# Each line: the message key (hex), a tab, the text. A '#' line is a comment: above each\n"
                 "# line, where it appears and its English. \\n breaks a line; {clear} ends a box and {page}\n"
                 "# starts the next; other {..} are the game's codes (names, numbers, colours): keep them.\n"
-                "# A key left out shows the English. The game's fonts have the Latin-1 letters, Œ œ ‘ ’ “ ” „ …\n"
-                "# and, with this pack's font.bin, ° ♪ γ.\n")
+                "# A key left out shows the English. " + FONT_NOTE.get(game, FONT_NOTE["Pokémon Colosseum"]))
         for font in (0, 1):
             keys = sorted(k for k in (english if template else lines) if english[k][0] == font)
             if not keys:
@@ -301,7 +316,12 @@ def main():
     ap.add_argument("--template", action="store_true")
     ap.add_argument("--no-zip", action="store_true")
     args = ap.parse_args()
-    usd, pald = cd.Disc(args.us_iso), cd.Disc(args.pal_iso)
+    usd = cd.Disc(args.us_iso)
+    if usd.id == xdtext.XD_DISC:
+        return xd_main(args, usd)
+    if args.pal_iso == "-":
+        sys.exit("need the European disc (GC6P01) for Colosseum's packs")
+    pald = cd.Disc(args.pal_iso)
     if usd.id != "GC6E01" or pald.id != "GC6P01":
         sys.exit("need GC6E01 and GC6P01 discs (got %s and %s)" % (usd.id, pald.id))
     us, pal = Archives(usd), Archives(pald)
@@ -509,6 +529,26 @@ def main():
                             zf.writestr(zi, src.read(), compresslevel=9)
             h = hashlib.sha256(open(z, "rb").read()).hexdigest()
             log("  %s %d bytes sha256 %s" % (os.path.basename(z), os.path.getsize(z), h))
+
+
+def xd_main(args, usd):
+    """Pokémon XD: the template (every English line) for fan translations."""
+    if not args.template or args.pal_iso != "-":
+        sys.exit("Pokémon XD: only the template so far (make_language_packs.py XD_US.iso - OUT --template); "
+                 "packs from XD's European disc (%s) are still to come" % xdtext.XD_PAL_DISC)
+    log("text: reading XD's messages")
+    english = xdtext.english(Archives(usd))
+    d = os.path.join(args.out, "xd-template")
+    os.makedirs(d, exist_ok=True)
+    write_text(os.path.join(d, "text.txt"), "xx", "template", {}, english, template=True, game="Pokémon XD")
+    info = dict(format=PACK_FORMAT, code="xx", name="Template (English)", version=args.version, game=xdtext.XD_DISC,
+                source="Pokémon XD: Gale of Darkness, US disc (GXXE01)", lines=len(english))
+    with open(os.path.join(d, "pack.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(info, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    shutil.copy(os.path.join(HERE, "README.txt"), os.path.join(d, "README.txt"))
+    fonts = collections.Counter(font for font, _, _ in english.values())
+    log("xd-template: %d lines (font 0: %d, font 1: %d)" % (len(english), fonts[0], fonts[1]))
 
 
 if __name__ == "__main__":

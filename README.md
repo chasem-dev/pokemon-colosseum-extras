@@ -20,4 +20,14 @@ python3 tools/languages/make_language_packs.py "Pokemon Colosseum (USA).iso" "Po
 
 A pack is a folder: `pack.json` and `text.txt` are all a translation needs; `font.bin`, `sprites.txt` and `files/` are optional. [`tools/languages/README.txt`](tools/languages/README.txt), also in every pack, describes the files. For a language the European disc doesn't have, start from `out/template/text.txt` (every English line, with where it appears), give `pack.json` your language's code and name, and put the folder in the launcher's languages folder (Settings → Gameplay → Open languages folder), or run the port with `COLO_LANGUAGE=/path/to/the/folder`.
 
+### Pokémon XD
+
+The port's XD reads language packs as well, its own (`"game": "GXXE01"` in `pack.json`). There are no official XD packs yet: they need XD's European disc (GXXP01). For a fan translation, write the template, every English line of XD, from your US disc:
+
+```sh
+python3 tools/languages/make_language_packs.py "Pokemon XD - Gale of Darkness (USA).iso" - out --template
+```
+
+and translate `out/xd-template/text.txt`, giving `pack.json` your language's code and name. With XD chosen in the launcher, Settings → Gameplay → Open languages folder opens XD's own languages folder.
+
 This repository holds no game code and no disc image. You need your own disc to play. This is an unofficial fan project, not affiliated with Nintendo, Creatures, GAME FREAK or The Pokémon Company.
