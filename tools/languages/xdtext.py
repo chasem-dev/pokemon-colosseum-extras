@@ -1,7 +1,8 @@
 """Pokémon XD's text (US disc, GXXE01), for an XD language pack's template.
 
-XD's message groups are laid out as Colosseum's (colomsg.py): .msg members of the archives, and the names and
-descriptions in common.fsys's common_rel. Its keys are global as Colosseum's, all under 0xFFFFF, with a few hundred
+XD's message groups are laid out as Colosseum's (colomsg.py): .msg members of the archives, the names and
+descriptions in common.fsys's common_rel, and main.dol's own group (the memory card and options text). Its
+keys are global as Colosseum's, all under 0xFFFFF, with a few hundred
 said two ways on the disc: the same line in two menus wrapped differently, or a menu Colosseum left on XD's disc. The
 template takes, for each key, the English the most archives have, and of those first one that isn't a leftover.
 
@@ -47,6 +48,10 @@ def english(archives):
     if rel is not None:
         for o, tag, font, count in cm.find_groups(rel, [b"US"]):
             take(font, cm.parse_group(rel, o)[1], "common_rel")
+    # main.dol's own group: the memory card, the options and other system text
+    dol, _ = archives.disc.dol()
+    for o, tag, font, count in cm.scan_groups(dol, [b"US"]):
+        take(font, cm.parse_group(dol, o)[1], "main.dol")
 
     def rank(item):
         text, uses = item

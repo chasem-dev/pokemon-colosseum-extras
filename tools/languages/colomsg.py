@@ -143,3 +143,30 @@ def find_groups(b, tags):
             continue
         found.append((o, b[o + 6:o + 8], font, count))
     return found
+
+
+def scan_groups(b, tags=None, min_count=30):
+    """Message groups anywhere in a module or main.dol, found by their tables: [(offset, tag, font, count)].
+    A group's keys are under 0x100000 and (mostly) ascending, its strings after its table. tags: keep only these."""
+    out = []
+    n = len(b)
+    for o in range(0, n - 0x20, 4):
+        if b[o] or b[o + 1]:
+            continue
+        count = (b[o + 4] << 8) | b[o + 5]
+        if count < min_count or o + 0x10 + 8 * count > n:
+            continue
+        tag = bytes(b[o + 6:o + 8])
+        if tags is not None and tag not in tags:
+            continue
+        lo, ok, rising, prev = 0x10 + 8 * count, 0, 0, -1
+        for i in range(count):
+            key, off = struct.unpack_from(">II", b, o + 0x10 + 8 * i)
+            if key >= 0x100000 or not lo <= off < n - o:
+                break
+            ok += 1
+            rising += key > prev
+            prev = key
+        if ok == count and rising >= 0.9 * count:
+            out.append((o, tag, b[o + 3], count))
+    return out

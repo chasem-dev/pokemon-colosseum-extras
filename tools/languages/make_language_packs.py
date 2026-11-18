@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Language packs for the Pokémon Colosseum PC port, made from the European disc.
+"""Language packs for the Pokémon Colosseum and XD PC port, made from the games' European and Japanese discs.
 
     make_language_packs.py US.iso PAL.iso OUT [--langs fr,de,es,it] [--template]
 
@@ -19,12 +19,16 @@ cards) are left out, so the game shows its English there.
 --template also writes OUT/template/text.txt: every English line, for translating into a language
 the European disc doesn't have. A pack needs only pack.json and text.txt; the rest is optional.
 
-Pokémon XD (US disc GXXE01): only the template so far, for fan translations, without a European disc:
+The same tool makes the other packs, from the other discs (the US disc first, as above):
 
-    make_language_packs.py XD_US.iso - OUT --template
+    make_language_packs.py XD_US.iso XD_PAL.iso OUT      Pokémon XD in French, German, Spanish and Italian (GXXP01)
+    make_language_packs.py US.iso JP.iso OUT             Pokémon Colosseum in Japanese (GC6J01)
+    make_language_packs.py XD_US.iso XD_JP.iso OUT       Pokémon XD in Japanese (GXXJ01)
+    make_language_packs.py XD_US.iso - OUT --template    XD's template (OUT/xd-template/: every English line)
 
-writes OUT/xd-template/ (text.txt with every English line of XD, and a pack.json for XD). Packs made from XD's
-European disc (GXXP01) are still to come.
+XD's packs go in OUT/xd/<code>/ and OUT/xd/xd-language-<code>-<version>.zip, Colosseum's Japanese one in OUT/ja/
+and OUT/colosseum-language-ja-<version>.zip; text and letters as above (regions.py), the European XD menu sheets
+and title cards, and the Japanese discs' title cards.
 """
 import argparse
 import collections
@@ -42,6 +46,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import colodisc as cd  # noqa: E402
 import colomsg as cm  # noqa: E402
+import regions  # noqa: E402
 import xdtext  # noqa: E402
 
 PACK_FORMAT = 1
@@ -110,10 +115,9 @@ def visible(text):
 
 
 # ---------------------------------------------------------------------------------------- text
-def gather_text(us, pal):
-    """{lang: {key: text}}, {key: (font, english, where)} for every US line with a translation."""
+def colosseum_english(us):
+    """{key: (font, english, where)}: Colosseum's English lines, the archives' then common_rel's."""
     english = {}
-    trans = {code: collections.defaultdict(collections.Counter) for code in LANGS}
     for arc in us.names():
         for m in us.get(arc, (0x0A,)):
             hdr, ents = cm.parse_group(m.data)
@@ -121,6 +125,23 @@ def gather_text(us, pal):
                 t = cm.decode(raw)
                 if key not in english and visible(t) and not JAPANESE.search(t):
                     english[key] = (hdr["font"], t, "%s/%s" % (arc, m.name))
+    ucr = next(m.data for m in us.get("common", (0x1C,)) if m.name == "common_rel")
+    for uo, _, font, count in cm.find_groups(ucr, [b"US"]):
+        if font != 1:
+            continue
+        for key, raw in cm.parse_group(ucr, uo)[1]:
+            t = cm.decode(raw)
+            if key not in english and visible(t) and not JAPANESE.search(t):
+                english[key] = (font, t, "common_rel")
+    return english
+
+
+def gather_text(us, pal):
+    """{lang: {key: text}}, {key: (font, english, where)} for every US line with a translation."""
+    english = colosseum_english(us)
+    trans = {code: collections.defaultdict(collections.Counter) for code in LANGS}
+    for arc in us.names():
+        for m in us.get(arc, (0x0A,)):
             base = PAL_NAME.get(arc, arc)
             for code, (msuf, asuf, _, _) in LANGS.items():
                 cands = [(base, "%s_%s" % (m.name, msuf)), ("%s_%s" % (base, asuf), "%s_%s" % (m.name, msuf)),
@@ -140,10 +161,6 @@ def gather_text(us, pal):
     for uo, _, font, count in ugroups:
         hdr, ents = cm.parse_group(ucr, uo)
         ukeys = {k for k, _ in ents}
-        for key, raw in ents:
-            t = cm.decode(raw)
-            if key not in english and visible(t) and not JAPANESE.search(t):
-                english[key] = (font, t, "common_rel")
         for code in LANGS:
             for po, tag, pfont, pcount in pgroups:
                 if tag != tag_of[code]:
@@ -227,20 +244,23 @@ def font_banks(dol, sections):
     return fonts
 
 
-def font_file(us_fonts, pal_fonts, us_dims):
-    """font.bin: for each font, a font file (8-byte header, bank, bitmaps) of the glyphs PAL has
-    that the US font lacks or draws differently. Big-endian, chained by the headers' next offsets."""
+def european_glyph(code, us, glyph):
+    """A glyph the European font has that the US one lacks or draws differently (kana and kanji left out: the
+    European text uses none)."""
+    return code < 0x3000 and (us is None or us != glyph)
+
+
+def font_file(us_fonts, pal_fonts, us_dims, want=european_glyph):
+    """font.bin: for each font, a font file (8-byte header, bank, bitmaps) of the other disc's glyphs that
+    want(code, US glyph or None, glyph) takes. Big-endian, chained by the headers' next offsets."""
     files = []
     report = {}
     for fid in sorted(pal_fonts):
-        if fid not in us_fonts:
+        if fid not in us_fonts or fid not in us_dims:
             continue
         glyphs = []
         for code, g in sorted(pal_fonts[fid].items()):
-            u = us_fonts[fid].get(code)
-            if code >= 0x3000:      # kana and kanji: the European text uses none
-                continue
-            if u is None or u[3] != g[3] or u[:3] != g[:3]:
+            if want(code, us_fonts[fid].get(code), g):
                 glyphs.append((code, g))
         if not glyphs:
             continue
@@ -317,11 +337,15 @@ def main():
     ap.add_argument("--no-zip", action="store_true")
     args = ap.parse_args()
     usd = cd.Disc(args.us_iso)
-    if usd.id == xdtext.XD_DISC:
+    if usd.id == xdtext.XD_DISC and args.pal_iso == "-":
         return xd_main(args, usd)
     if args.pal_iso == "-":
         sys.exit("need the European disc (GC6P01) for Colosseum's packs")
     pald = cd.Disc(args.pal_iso)
+    other = {(xdtext.XD_DISC, xdtext.XD_PAL_DISC): xd_pal_main, ("GC6E01", JA_DISC["GC6E01"]): ja_main,
+             (xdtext.XD_DISC, JA_DISC[xdtext.XD_DISC]): ja_main}.get((usd.id, pald.id))
+    if other:
+        return other(args, usd, pald)
     if usd.id != "GC6E01" or pald.id != "GC6P01":
         sys.exit("need GC6E01 and GC6P01 discs (got %s and %s)" % (usd.id, pald.id))
     us, pal = Archives(usd), Archives(pald)
@@ -517,18 +541,267 @@ def main():
         log("%s: %d lines, %d sprites, %d sheets, %d title cards; %s" % (
             code, len(text[code]), len(sprite_lines), nfiles, nwzx, dict(problems) or "no problems"))
         if not args.no_zip:
-            z = os.path.join(args.out, "colosseum-language-%s-%s.zip" % (code, args.version))
-            with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-                for root, _, files in sorted(os.walk(d)):
-                    for fn in sorted(files):
-                        full = os.path.join(root, fn)
-                        zi = zipfile.ZipInfo(os.path.relpath(full, args.out).replace(os.sep, "/"), (2026, 1, 1, 0, 0, 0))
-                        zi.compress_type = zipfile.ZIP_DEFLATED
-                        zi.external_attr = 0o644 << 16
-                        with open(full, "rb") as src:
-                            zf.writestr(zi, src.read(), compresslevel=9)
-            h = hashlib.sha256(open(z, "rb").read()).hexdigest()
-            log("  %s %d bytes sha256 %s" % (os.path.basename(z), os.path.getsize(z), h))
+            zip_pack(args.out, code, os.path.join(args.out, "colosseum-language-%s-%s.zip" % (code, args.version)))
+
+
+def zip_pack(root, code, z):
+    """root/code/ as a zip whose top folder is the pack's code (as the launcher installs it), the same bytes each time."""
+    d = os.path.join(root, code)
+    with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for top, _, files in sorted(os.walk(d)):
+            for fn in sorted(files):
+                full = os.path.join(top, fn)
+                zi = zipfile.ZipInfo(os.path.relpath(full, root).replace(os.sep, "/"), (2026, 1, 1, 0, 0, 0))
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                zi.external_attr = 0o644 << 16
+                with open(full, "rb") as src:
+                    zf.writestr(zi, src.read(), compresslevel=9)
+    h = hashlib.sha256(open(z, "rb").read()).hexdigest()
+    log("  %s %d bytes sha256 %s" % (os.path.basename(z), os.path.getsize(z), h))
+
+
+GAME_NAME = {"GC6E01": "Pokémon Colosseum", xdtext.XD_DISC: "Pokémon XD"}
+GAME_SOURCE = {"GC6P01": "Pokémon Colosseum, European disc (GC6P01)",
+               "GC6J01": "Pokémon Colosseum, Japanese disc (GC6J01)",
+               xdtext.XD_PAL_DISC: "Pokémon XD: Gale of Darkness, European disc (GXXP01)",
+               "GXXJ01": "Pokémon XD: Yami no Kaze Dark Lugia, Japanese disc (GXXJ01)"}
+JA_DISC = {"GC6E01": "GC6J01", xdtext.XD_DISC: "GXXJ01"}
+ZIP_NAME = {"GC6E01": "colosseum-language-%s-%s.zip", xdtext.XD_DISC: "xd-language-%s-%s.zip"}
+
+
+def us_english(usd, us):
+    return xdtext.english(us) if usd.id == xdtext.XD_DISC else colosseum_english(us)
+
+
+def pack_root(args, usd):
+    """Where a game's packs go: OUT for Colosseum's, OUT/xd for XD's (each pack in a folder named by its code)."""
+    root = args.out if usd.id == "GC6E01" else os.path.join(args.out, "xd")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def write_pack(args, usd, srcd, root, code, lname, lines, english, fontbin=b"", files=(), extra=None):
+    """root/code/: pack.json, text.txt, font.bin (if any), files/ (archive members: {(archive, member file): data}),
+    README.txt; and its zip."""
+    d = os.path.join(root, code)
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+    write_text(os.path.join(d, "text.txt"), code, lname, lines, english, game=GAME_NAME[usd.id])
+    if fontbin:
+        with open(os.path.join(d, "font.bin"), "wb") as f:
+            f.write(fontbin)
+    for (arc, fn), data in sorted(files.items() if isinstance(files, dict) else files):
+        p = os.path.join(d, "files", arc + ".fsys")
+        os.makedirs(p, exist_ok=True)
+        with open(os.path.join(p, fn), "wb") as f:
+            f.write(data)
+    info = dict(format=PACK_FORMAT, code=code, name=lname, version=args.version, game=usd.id,
+                source=GAME_SOURCE[srcd.id], lines=len(lines), files=len(files))
+    info.update(extra or {})
+    with open(os.path.join(d, "pack.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump(info, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    shutil.copy(os.path.join(HERE, "README.txt"), os.path.join(d, "README.txt"))
+    if not args.no_zip:
+        zip_pack(root, code, os.path.join(root, ZIP_NAME[usd.id] % (code, args.version)))
+
+
+def missing_glyphs(lines, fonts):
+    """The characters the lines draw that no font has (font 0's chain, which the dialogue draws from)."""
+    have = set()
+    for f in fonts:
+        have |= set(f.get(0, {}))
+    return sorted(c for c in regions.text_chars(lines) if ord(c) not in have and c not in " \u3000")
+
+
+XD_LANGS = {"fr": (b"FR", "fr", "Français"), "de": (b"GE", "ge", "Deutsch"), "es": (b"SP", "sp", "Español"),
+            "it": (b"IT", "it", "Italiano")}
+
+
+def xd_pal_main(args, usd, pald):
+    """Pokémon XD in French, German, Spanish and Italian, from XD's European disc."""
+    us, pal = Archives(usd), Archives(pald)
+    langs = [c for c in args.langs.split(",") if c]
+    root = pack_root(args, usd)
+    log("text: reading both discs' messages")
+    english = us_english(usd, us)
+    udol, usec = usd.dol()
+    pdol, psec = pald.dol()
+    ufonts = font_banks(udol, usec)   # the fonts the game always has (a floor's own come and go with it)
+    pfonts = regions.merge_fonts(font_banks(pdol, psec), regions.archive_fonts(pal))
+    dims = font_dims(udol, usec)
+    for code in langs:
+        tag, asuf, lname = XD_LANGS[code]
+        lines = regions.pick(english, regions.translations(pal, [tag]))
+        chars = {ord(c) for c in regions.text_chars(lines)}
+        fontbin, freport = font_file(ufonts, pfonts, dims,
+                                     lambda c, u, g: c in chars and c < 0x3000 and (u is None or u != g))
+        files = xd_pal_files(us, pal, asuf)
+        log("%s: %d of %d lines, font.bin %d bytes %s, %d archive members" % (
+            code, len(lines), len(english), len(fontbin), freport, len(files)))
+        miss = missing_glyphs(lines, [ufonts, pfonts])
+        if miss:
+            log("  letters no font has:", "".join(miss))
+        write_pack(args, usd, pald, root, code, lname, lines, english, fontbin, files)
+
+
+# sheets whose European layout differs from the US one (the menus cut them by the US layout): left in English
+XD_LAYOUT_CHANGED = {"uv_pkm_status_00"}
+
+
+# sheets with a title in rows y0..y1 that the menus cut by the US title's width: the language's title is fitted
+# into the US one's place, on the US sheet
+XD_FIT_TITLE = {"uv_ttl_battle_00": (408, 462)}
+
+
+def ci8_pixels(data):
+    """An 8-bit indexed texture's (width, height, indices by row, palette as RGB5A3 words)."""
+    w, h = cd.be16(data, 0), cd.be16(data, 2)
+    tw = (w + 7) // 8
+    po = cd.be32(data, 0x48)
+    pal = [cd.be16(data, po + 2 * i) for i in range(256)]
+    px = [[data[0x80 + ((y // 4) * tw + x // 8) * 32 + (y % 4) * 8 + x % 8] for x in range(w)] for y in range(h)]
+    return w, h, px, pal
+
+
+def rgb5a3(v):
+    if v & 0x8000:
+        return ((v >> 10) & 31) * 255 // 31, ((v >> 5) & 31) * 255 // 31, (v & 31) * 255 // 31, 255
+    return ((v >> 8) & 15) * 17, ((v >> 4) & 15) * 17, (v & 15) * 17, ((v >> 12) & 7) * 255 // 7
+
+
+def fit_title(us_data, lang_data, y0, y1):
+    """The US sheet with its title (rows y0..y1) replaced by the language's, squeezed to the US title's width where
+    it is wider, in the US sheet's palette. None if either isn't an 8-bit indexed texture."""
+    if gtx_shape(us_data)[2:] != (8, 1) or gtx_shape(lang_data)[2:] != (8, 1):
+        return None
+    uw, uh, upx, upal = ci8_pixels(us_data)
+    lw, lh, lpx, lpal = ci8_pixels(lang_data)
+    if uh < y1 or lh < y1:
+        return None
+    ucol, lcol = [rgb5a3(v) for v in upal], [rgb5a3(v) for v in lpal]
+
+    def ink(px, cols, w):
+        xs = [x for y in range(y0, y1) for x in range(w) if cols[px[y][x]][3] > 128 and cols[px[y][x]][0] > 160]
+        return (min(xs), max(xs) + 1) if xs else None
+    ub, lb = ink(upx, ucol, uw), ink(lpx, lcol, lw)
+    if not ub or not lb:
+        return None
+    nearest = {}
+    for i in range(256):
+        c = lcol[i]
+        nearest[i] = min(range(256), key=lambda j: sum((a - b) ** 2 for a, b in zip(c, ucol[j])))
+    clear = min(range(256), key=lambda j: ucol[j][3])
+    out = bytearray(us_data)
+    tw = (uw + 7) // 8
+    width, left = min(ub[1] - ub[0], lb[1] - lb[0]), ub[0]
+    for y in range(y0, y1):
+        for x in range(uw):
+            if left <= x < left + width:
+                sx = lb[0] + (x - left) * (lb[1] - lb[0]) // width
+                i = nearest[lpx[y][sx]]
+            else:
+                i = clear
+            out[0x80 + ((y // 4) * tw + x // 8) * 32 + (y % 4) * 8 + x % 8] = i
+    return bytes(out)
+
+
+def gtx_shape(data):
+    """A texture's (width, height, bits per pixel, format)."""
+    return (cd.be16(data, 0), cd.be16(data, 2), data[4], data[0x0B]) if len(data) >= 0x80 else None
+
+
+def xd_pal_files(us, pal, asuf):
+    """Archive members to replace: {(US archive, member file): data}. A language's archive (<archive>_fr.fsys)
+    holds the menus' sheets in that language: as the English one's name with the language in it
+    (uv_icn_type_big_fr_00), or unnamed, the English sheet it stands for then the one of the same size. A sheet
+    goes where the US archive has the English one, laid out as it is; the battle and colosseum title cards
+    (wzx_*_fr.fsys) whole, where the US effect is the European English one."""
+    files = {}
+    for a in pal.names():
+        if not a.endswith("_" + asuf):
+            continue
+        base = a[:-len(asuf) - 1]
+        lang = pal.get(a)
+        en = pal.get(base)
+        usm = us.get(base)
+        if not en or not usm:
+            continue
+        if base.startswith("wzx_"):
+            if len(lang) == 1 and len(en) == 1 and len(usm) == 1 and en[0].data == usm[0].data:
+                files[(base, "%s.%s" % (usm[0].name, cd.type_ext(usm[0].type)))] = lang[0].data
+            continue
+        us_by_name = {m.name: m for m in usm if m.type == 0x12}
+        en_by_name = {m.name: m for m in en if m.type == 0x12}
+        named = {m.name for m in lang if m.name != "(null)"}
+        pool = [m for m in en if m.type == 0x12 and m.name not in named]
+        for m in lang:
+            if m.type != 0x12:
+                continue
+            if m.name != "(null)":
+                e = en_by_name.get(m.name)
+                if e is not None and e.data == m.data:
+                    continue
+                name = m.name.replace("_%s_" % asuf, "_").replace(".gtx", "")
+            else:
+                cands = [e for e in pool if gtx_shape(e.data) == gtx_shape(m.data)]
+                fit = [n for n in XD_FIT_TITLE if n in us_by_name and n in en_by_name and n not in named
+                       and cd.be16(en_by_name[n].data, 2) == cd.be16(m.data, 2)]
+                if not cands and len(fit) == 1:   # a title sheet made wider for the language's title
+                    name = fit[0]
+                    data = fit_title(us_by_name[name].data, m.data, *XD_FIT_TITLE[name])
+                    if data and data != us_by_name[name].data:
+                        files[(base, "%s.%s" % (name, cd.type_ext(0x12)))] = data
+                    continue
+                if len(cands) != 1:
+                    continue
+                name = cands[0].name
+                if name in XD_FIT_TITLE:
+                    data = fit_title(us_by_name[name].data, m.data, *XD_FIT_TITLE[name]) if name in us_by_name else None
+                    if data and data != us_by_name[name].data:
+                        files[(base, "%s.%s" % (name, cd.type_ext(0x12)))] = data
+                    continue
+            u = us_by_name.get(name)
+            if u is None or name in XD_LAYOUT_CHANGED or gtx_shape(u.data) != gtx_shape(m.data) or u.data == m.data:
+                continue
+            files[(base, "%s.%s" % (name, cd.type_ext(0x12)))] = m.data
+    return files
+
+
+def ja_main(args, usd, jpd):
+    """Japanese, from the game's Japanese disc: its text with the kanji's readings, and the letters it draws."""
+    us, jp = Archives(usd), Archives(jpd)
+    root = pack_root(args, usd)
+    log("text: reading both discs' messages")
+    english = us_english(usd, us)
+    tags = [b"JP"] if usd.id == xdtext.XD_DISC else None   # Colosseum's Japanese disc leaves its groups untagged
+    lines = regions.pick(english, regions.translations(jp, tags))
+    log("font")
+    udol, usec = usd.dol()
+    jdol, jsec = jpd.dol()
+    ufonts = font_banks(udol, usec)   # the fonts the game always has (a floor's own come and go with it)
+    jfonts = regions.merge_fonts(font_banks(jdol, jsec), regions.archive_fonts(jp))
+    chars = {ord(c) for c in regions.text_chars(lines)}
+
+    def want(c, u, g):
+        # the letters the text draws that the US font lacks, and its kana and kanji as the Japanese font draws them
+        return c in chars and (u is None or (c >= 0x3000 and u != g))
+    fontbin, freport = font_file(ufonts, jfonts, font_dims(udol, usec), want)
+    log("ja: %d of %d lines, font.bin %d bytes, glyphs per font %s" % (
+        len(lines), len(english), len(fontbin), {k: len(v) for k, v in freport.items()}))
+    miss = missing_glyphs(lines, [ufonts, jfonts])
+    if miss:
+        log("  letters no font has:", "".join(miss))
+    files = {}
+    for a in us.names():   # the battle and colosseum title cards, whole effects
+        if not a.startswith(("wzx_battle_name", "wzx_colo_intro")):
+            continue
+        um, jm = us.get(a), jp.get(a)
+        if len(um) == 1 and len(jm) == 1 and um[0].name == jm[0].name and um[0].data != jm[0].data:
+            files[(a, "%s.%s" % (um[0].name, cd.type_ext(um[0].type)))] = jm[0].data
+    log("  %d title cards" % len(files))
+    write_pack(args, usd, jpd, root, "ja", "日本語", lines, english, fontbin, files)
 
 
 def xd_main(args, usd):
