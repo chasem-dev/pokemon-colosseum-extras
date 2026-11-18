@@ -67,7 +67,9 @@ Japanese
   The Japanese packs (both games, from their Japanese discs: GC6J01, GXXJ01) have the Japanese
   text with its kanji's readings ({04}kanji{05}reading{06}, drawn small above the kanji), the
   kanji and kana their text draws in font.bin, and the title cards. Their menus' pictures stay
-  the US ones: the Japanese sheets are laid out for the Japanese menus.
+  the US ones: the Japanese sheets are laid out for the Japanese menus. Colosseum's also has
+  Rui's models from the Japanese disc: her outfit as it was before the US release covered it at
+  the waist and legs (field, battle, scenes and bike).
 
 Made by make_language_packs.py (pokemon-colosseum-extras, tools/languages) from the game's
 European or Japanese disc (pack.json's "source" says which). The packs hold the game's own text and

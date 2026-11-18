@@ -22,7 +22,7 @@ A pack is a folder: `pack.json` and `text.txt` are all a translation needs; `fon
 
 ### Pokémon XD and Japanese
 
-The port's XD reads language packs as well, its own (`"game": "GXXE01"` in `pack.json`). XD's packs come in French, German, Spanish and Italian, made from XD's European disc (GXXP01) with its translated menu pictures and title cards, and in Japanese from XD's Japanese disc (GXXJ01). Colosseum has a Japanese pack too, from its Japanese disc (GC6J01). The Japanese packs carry the kanji and kana their text draws, and the kanji's readings shown above them; their menu pictures stay the US ones. The US disc goes first:
+The port's XD reads language packs as well, its own (`"game": "GXXE01"` in `pack.json`). XD's packs come in French, German, Spanish and Italian, made from XD's European disc (GXXP01) with its translated menu pictures and title cards, and in Japanese from XD's Japanese disc (GXXJ01). Colosseum has a Japanese pack too, from its Japanese disc (GC6J01). The Japanese packs carry the kanji and kana their text draws, and the kanji's readings shown above them; their menu pictures stay the US ones. Colosseum's Japanese pack also brings back Rui's original outfit, which the US release covered at the waist and legs. The US disc goes first:
 
 ```sh
 python3 tools/languages/make_language_packs.py "Pokemon XD - Gale of Darkness (USA).iso" "Pokemon XD - Gale of Darkness (Europe) (En,Fr,De,Es,It).iso" out

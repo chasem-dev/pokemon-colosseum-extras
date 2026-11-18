@@ -566,6 +566,8 @@ GAME_SOURCE = {"GC6P01": "Pokémon Colosseum, European disc (GC6P01)",
                xdtext.XD_PAL_DISC: "Pokémon XD: Gale of Darkness, European disc (GXXP01)",
                "GXXJ01": "Pokémon XD: Yami no Kaze Dark Lugia, Japanese disc (GXXJ01)"}
 JA_DISC = {"GC6E01": "GC6J01", xdtext.XD_DISC: "GXXJ01"}
+# models each Japanese pack takes from the Japanese disc (by member name), where the US disc's differ
+JA_MODELS = {"GC6E01": ("hizuki_a1", "hizuki_b1", "hizuki_b2", "bike_hizuki")}
 ZIP_NAME = {"GC6E01": "colosseum-language-%s-%s.zip", xdtext.XD_DISC: "xd-language-%s-%s.zip"}
 
 
@@ -801,6 +803,21 @@ def ja_main(args, usd, jpd):
         if len(um) == 1 and len(jm) == 1 and um[0].name == jm[0].name and um[0].data != jm[0].data:
             files[(a, "%s.%s" % (um[0].name, cd.type_ext(um[0].type)))] = jm[0].data
     log("  %d title cards" % len(files))
+    # models the US release redrew: Rui's outfit, covered at the waist and legs outside Japan (the US disc keeps
+    # the Japanese models too, in people_archive.fsys); every US copy that differs from the Japanese disc's
+    names = set(JA_MODELS.get(usd.id, ()))
+    want = (lambda n, t: n in names) if names else None
+    for a in us.names() if names else ():
+        fn = a + ".fsys"
+        um = [m for m in cd.fsys_members(usd.file(fn), want) if m.data is not None]
+        if not um or fn not in jpd.files:
+            continue
+        jm = {(m.name, m.type): m.data for m in cd.fsys_members(jpd.file(fn), want) if m.data is not None}
+        for m in um:
+            j = jm.get((m.name, m.type))
+            if j is not None and j != m.data:
+                files[(a, "%s.%s" % (m.name, cd.type_ext(m.type)))] = j
+                log("  Japanese model: %s/%s" % (a, m.name))
     write_pack(args, usd, jpd, root, "ja", "日本語", lines, english, fontbin, files)
 
 
